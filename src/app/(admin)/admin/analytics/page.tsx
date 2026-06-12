@@ -1,7 +1,8 @@
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TIER_LABELS } from "@/lib/constants";
+import { AnalyticsOverview } from "@/components/admin/AnalyticsOverview";
+import { RedemptionTable } from "@/components/admin/RedemptionTable";
+import { RedemptionStatus } from "@prisma/client";
 
 export default async function AdminAnalyticsPage() {
   await requireAdmin();
@@ -11,11 +12,12 @@ export default async function AdminAnalyticsPage() {
 
   const [
     totalUsers,
-    newUsers,
+    newUsersThisWeek,
     totalRedemptions,
-    weekRedemptions,
+    redemptionsThisWeek,
     conditionBreakdown,
     topPartnersRaw,
+    recentRedemptions,
   ] = await Promise.all([
     prisma.user.count({ where: { active: true } }),
     prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
@@ -32,97 +34,92 @@ export default async function AdminAnalyticsPage() {
       orderBy: { _count: { id: "desc" } },
       take: 10,
     }),
+    prisma.redemption.findMany({
+      orderBy: { clickedAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        referralCode: true,
+        clickedAt: true,
+        convertedAt: true,
+        conversionValue: true,
+        status: true,
+        user: { select: { id: true } },
+        benefit: { select: { id: true, title: true } },
+        partner: { select: { id: true, name: true, slug: true } },
+      },
+    }),
   ]);
 
-  const [conditionNames, partnerDetails] = await Promise.all([
+  const conditionIds = conditionBreakdown
+    .map((c) => c.conditionId)
+    .filter((id): id is string => id !== null);
+
+  const [conditionNames, partnerDetails, conversionCounts] = await Promise.all([
     prisma.condition.findMany({
-      where: {
-        id: {
-          in: conditionBreakdown
-            .map((c) => c.conditionId)
-            .filter((id): id is string => id !== null),
-        },
-      },
+      where: { id: { in: conditionIds } },
       select: { id: true, name: true },
     }),
     prisma.partner.findMany({
       where: { id: { in: topPartnersRaw.map((r) => r.partnerId) } },
       select: { id: true, name: true, tier: true },
     }),
+    prisma.redemption.groupBy({
+      by: ["partnerId"],
+      _count: { id: true },
+      where: {
+        status: "CONVERTED",
+        partnerId: { in: topPartnersRaw.map((r) => r.partnerId) },
+      },
+    }),
   ]);
 
   const conditionMap = Object.fromEntries(conditionNames.map((c) => [c.id, c.name]));
   const partnerMap = Object.fromEntries(partnerDetails.map((p) => [p.id, p]));
+  const conversionMap = Object.fromEntries(conversionCounts.map((c) => [c.partnerId, c._count.id]));
+
+  const topPartners = topPartnersRaw.map((r) => ({
+    partner: partnerMap[r.partnerId],
+    clickCount: r._count.id,
+    conversionCount: conversionMap[r.partnerId] ?? 0,
+  }));
+
+  const conditionBreakdownFormatted = conditionBreakdown.map((c) => ({
+    condition: conditionMap[c.conditionId!] ?? "Unknown",
+    userCount: c._count.id,
+  }));
+
+  // Adapt recentRedemptions for RedemptionTable
+  const tableRedemptions = recentRedemptions.map((r) => ({
+    ...r,
+    status: r.status as RedemptionStatus,
+    conversionValue: r.conversionValue ? Number(r.conversionValue) : null,
+  }));
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-8" style={{ fontFamily: "Cambria, serif" }}>
+      <h1
+        className="text-2xl font-bold text-gray-900 mb-8"
+        style={{ fontFamily: "Cambria, serif" }}
+      >
         Analytics Overview
       </h1>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: "Total users", value: totalUsers },
-          { label: "New (7d)", value: newUsers },
-          { label: "Total redemptions", value: totalRedemptions },
-          { label: "Redemptions (7d)", value: weekRedemptions },
-        ].map(({ label, value }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-xs text-gray-500 mb-1">{label}</p>
-            <p className="text-2xl font-bold text-gray-900">{value.toLocaleString()}</p>
-          </div>
-        ))}
-      </div>
+      <AnalyticsOverview
+        totalUsers={totalUsers}
+        newUsersThisWeek={newUsersThisWeek}
+        totalRedemptions={totalRedemptions}
+        redemptionsThisWeek={redemptionsThisWeek}
+        topPartners={topPartners}
+        conditionBreakdown={conditionBreakdownFormatted}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Top partners by clicks</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {topPartnersRaw.map((r, i) => {
-                const partner = partnerMap[r.partnerId];
-                return partner ? (
-                  <div key={r.partnerId} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 w-4">{i + 1}.</span>
-                      <div>
-                        <p className="font-medium text-gray-900">{partner.name}</p>
-                        <p className="text-xs text-gray-400">{TIER_LABELS[partner.tier]}</p>
-                      </div>
-                    </div>
-                    <span className="font-semibold text-[#0F5D58]">{r._count.id}</span>
-                  </div>
-                ) : null;
-              })}
-              {topPartnersRaw.length === 0 && (
-                <p className="text-sm text-gray-400">No redemptions yet</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Users by condition</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {conditionBreakdown.map((c) => (
-                <div key={c.conditionId} className="flex items-center justify-between text-sm">
-                  <p className="text-gray-900">
-                    {conditionMap[c.conditionId!] ?? "Unknown"}
-                  </p>
-                  <span className="font-semibold text-[#0F5D58]">{c._count.id}</span>
-                </div>
-              ))}
-              {conditionBreakdown.length === 0 && (
-                <p className="text-sm text-gray-400">No users with conditions set</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900">Recent redemptions</h2>
+          <span className="text-xs text-gray-400">Last 50</span>
+        </div>
+        <RedemptionTable redemptions={tableRedemptions} />
       </div>
     </div>
   );

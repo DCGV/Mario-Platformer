@@ -2,9 +2,12 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, getOrCreateUser } from "@/lib/auth";
 import { TierBadge } from "@/components/partner/TierBadge";
-import { RedemptionButton } from "@/components/benefit/RedemptionButton";
+import { BenefitList } from "@/components/benefit/BenefitList";
 import { CATEGORY_LABELS } from "@/lib/constants";
+import { logAnalyticsEvent } from "@/lib/analytics";
+import { EventType } from "@prisma/client";
 import Image from "next/image";
+import Link from "next/link";
 
 interface PartnerPageProps {
   params: Promise<{ partnerSlug: string }>;
@@ -52,12 +55,42 @@ export default async function PartnerPage({ params }: PartnerPageProps) {
 
   if (!partner || partner.vettingStatus !== "APPROVED") notFound();
 
+  // Fire analytics non-blocking
+  void logAnalyticsEvent(EventType.PARTNER_VIEWED, {
+    partnerId: partner.id,
+    conditionId: partner.conditions[0]?.condition.id,
+  });
+
+  const conditionSlug = partner.conditions[0]?.condition.slug;
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
+      {/* Breadcrumb */}
+      {conditionSlug && (
+        <Link
+          href={`/hub/${conditionSlug}`}
+          className="text-xs text-gray-400 hover:text-[#0F5D58] mb-5 block"
+        >
+          ← Back to hub
+        </Link>
+      )}
+
+      {/* Hero image */}
+      {partner.heroImageUrl && (
+        <div className="relative h-40 rounded-2xl overflow-hidden bg-gradient-to-br from-[#0F5D58] to-[#0a4440] mb-6">
+          <Image
+            src={partner.heroImageUrl}
+            alt={`${partner.name} hero`}
+            fill
+            className="object-cover opacity-40"
+          />
+        </div>
+      )}
+
       {/* Partner header */}
       <div className="flex items-start gap-4 mb-6">
         {partner.logoUrl ? (
-          <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0">
+          <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
             <Image
               src={partner.logoUrl}
               alt={`${partner.name} logo`}
@@ -68,9 +101,7 @@ export default async function PartnerPage({ params }: PartnerPageProps) {
           </div>
         ) : (
           <div className="w-16 h-16 rounded-xl bg-[#0F5D58]/10 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#0F5D58] font-bold text-2xl">
-              {partner.name[0]}
-            </span>
+            <span className="text-[#0F5D58] font-bold text-2xl">{partner.name[0]}</span>
           </div>
         )}
         <div className="flex-1 min-w-0">
@@ -107,43 +138,19 @@ export default async function PartnerPage({ params }: PartnerPageProps) {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Available benefits
           </h2>
-          <div className="space-y-4">
-            {partner.benefits.map((benefit) => (
-              <div
-                key={benefit.id}
-                className="rounded-xl border border-gray-200 bg-white p-5"
-              >
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div>
-                    <p className="font-semibold text-gray-900">{benefit.title}</p>
-                    <p className="text-[#0F5D58] font-medium text-sm mt-0.5">
-                      {benefit.valueDescription}
-                    </p>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-4">{benefit.description}</p>
-                {benefit.eligibilityNotes && (
-                  <p className="text-xs text-gray-400 mb-3">
-                    * {benefit.eligibilityNotes}
-                  </p>
-                )}
-                <RedemptionButton
-                  benefitId={benefit.id}
-                  partnerName={partner.name}
-                  ctaText={benefit.ctaText}
-                  isLoggedIn={true}
-                />
-              </div>
-            ))}
-          </div>
+          <BenefitList
+            benefits={partner.benefits}
+            partnerName={partner.name}
+            isLoggedIn={true}
+          />
         </div>
       )}
 
-      {/* Vetting note */}
-      <div className="mt-8 p-4 bg-[#0F5D58]/5 rounded-lg">
+      {/* Vetting badge */}
+      <div className="mt-8 p-4 bg-[#0F5D58]/5 rounded-xl border border-[#0F5D58]/10">
         <p className="text-xs text-[#0F5D58]">
-          ✓ This partner has been vetted by Vela Health for clinical relevance,
-          patient safety, and business integrity.
+          ✓ Vetted by Vela Health for clinical relevance, patient safety, evidence
+          base, and business integrity.
         </p>
       </div>
     </div>
