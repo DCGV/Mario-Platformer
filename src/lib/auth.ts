@@ -1,8 +1,24 @@
-import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 
+// Demo user used when DEMO_MODE=true (no Supabase needed)
+const DEMO_USER = {
+  id: "demo-supabase-id-000000",
+  email: "demo@velahealth.com",
+  app_metadata: {},
+  user_metadata: {},
+  aud: "authenticated",
+  created_at: new Date().toISOString(),
+} as const;
+
+function isDemoMode() {
+  return process.env.DEMO_MODE === "true";
+}
+
 export async function getServerSession() {
+  if (isDemoMode()) return DEMO_USER;
+
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },

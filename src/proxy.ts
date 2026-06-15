@@ -1,0 +1,17 @@
+import { type NextRequest, NextResponse } from "next/server";
+
+export async function proxy(request: NextRequest) {
+  // In demo mode skip Supabase session refresh — auth is handled per-request
+  if (process.env.DEMO_MODE === "true") {
+    return NextResponse.next({ request });
+  }
+
+  const { updateSession } = await import("@/lib/supabase/middleware");
+  return updateSession(request);
+}
+
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
+};
