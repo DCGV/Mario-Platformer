@@ -3,6 +3,8 @@ import { getServerSession } from "@/lib/auth";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 const ADMIN_NAV = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/partners", label: "Partners" },
