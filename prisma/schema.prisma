@@ -1,0 +1,376 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────
+// CORE DOMAIN
+// ─────────────────────────────────────────
+
+model Condition {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  slug         String   @unique
+  description  String
+  iconUrl      String?
+  heroImageUrl String?
+  tagline      String?
+  active       Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users             User[]
+  partnerConditions PartnerCondition[]
+  benefitConditions BenefitCondition[]
+  sponsorPlacements SponsorPlacement[]
+  analyticsEvents   AnalyticsEvent[]
+
+  @@map("conditions")
+}
+
+model Partner {
+  id               String        @id @default(cuid())
+  name             String        @unique
+  slug             String        @unique
+  tagline          String?
+  description      String        @db.Text
+  logoUrl          String?
+  heroImageUrl     String?
+  websiteUrl       String
+  affiliateBaseUrl String?
+
+  tier     PartnerTier
+  category PartnerCategory
+
+  vettingStatus VettingStatus @default(PENDING)
+  vettingScore  Json?
+  vettingNotes  String?       @db.Text
+  vettedBy      String?
+  vettedAt      DateTime?
+
+  commissionRate Decimal?  @db.Decimal(5, 4)
+  isFeatured     Boolean   @default(false)
+  featuredUntil  DateTime?
+  featuredBadge  String?
+  displayOrder   Int       @default(0)
+  active         Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conditions        PartnerCondition[]
+  benefits          Benefit[]
+  redemptions       Redemption[]
+  sponsorPlacements SponsorPlacement[]
+  analyticsEvents   AnalyticsEvent[]
+
+  @@map("partners")
+}
+
+enum PartnerTier {
+  CLINICAL
+  SUPPORTIVE
+  FINANCIAL
+}
+
+enum PartnerCategory {
+  DIETITIAN
+  TELEHEALTH
+  LAB
+  CGM
+  TRANSPORT
+  FITNESS
+  MEAL_KIT
+  MENTAL_HEALTH
+  SLEEP
+  INJECTION_SUPPORT
+  SAVINGS
+  DEVICE
+  GI_RELIEF
+  CAREGIVER
+  PHARMACY
+  OTHER
+}
+
+enum VettingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  UNDER_REVIEW
+}
+
+model PartnerCondition {
+  partnerId   String
+  conditionId String
+  partner     Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  condition   Condition @relation(fields: [conditionId], references: [id], onDelete: Cascade)
+
+  @@id([partnerId, conditionId])
+  @@map("partner_conditions")
+}
+
+model Benefit {
+  id        String  @id @default(cuid())
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  title            String
+  description      String   @db.Text
+  valueDescription String
+  ctaText          String   @default("Get this benefit")
+  ctaPath          String
+
+  discountType  DiscountType?
+  discountValue Decimal?      @db.Decimal(8, 2)
+
+  eligibilityNotes String?
+  validFrom        DateTime?
+  validTo          DateTime?
+  active           Boolean  @default(true)
+  displayOrder     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  conditions  BenefitCondition[]
+  redemptions Redemption[]
+
+  @@map("benefits")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_TRIAL
+  FREE_CONSULTATION
+  FREE_ACCESS
+  OTHER
+}
+
+model BenefitCondition {
+  benefitId   String
+  conditionId String
+  benefit     Benefit   @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  condition   Condition @relation(fields: [conditionId], references: [id], onDelete: Cascade)
+
+  @@id([benefitId, conditionId])
+  @@map("benefit_conditions")
+}
+
+// ─────────────────────────────────────────
+// USERS & REDEMPTIONS
+// ─────────────────────────────────────────
+
+model User {
+  id         String @id @default(cuid())
+  supabaseId String @unique
+  email      String @unique
+  firstName  String?
+  lastName   String?
+  zipCode    String?
+
+  conditionId    String?
+  condition      Condition? @relation(fields: [conditionId], references: [id])
+  treatmentStart DateTime?
+  drugName       String?
+
+  onboardingCompletedAt DateTime?
+  subscriptionTier      SubscriptionTier @default(FREE)
+  active                Boolean          @default(true)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  redemptions Redemption[]
+  rewards     Reward[]
+
+  @@map("users")
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+}
+
+model Redemption {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  benefitId String
+  benefit   Benefit @relation(fields: [benefitId], references: [id])
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id])
+
+  referralCode    String           @unique
+  clickedAt       DateTime         @default(now())
+  convertedAt     DateTime?
+  conversionValue Decimal?         @db.Decimal(10, 2)
+
+  status    RedemptionStatus @default(CLICKED)
+  ipHash    String?
+  userAgent String?
+
+  rewards Reward[]
+
+  @@map("redemptions")
+}
+
+enum RedemptionStatus {
+  CLICKED
+  CONVERTED
+  COMMISSION_CONFIRMED
+  REJECTED
+}
+
+model Reward {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  redemptionId String?
+  redemption   Redemption? @relation(fields: [redemptionId], references: [id])
+
+  rewardType  RewardType
+  amount      Decimal    @db.Decimal(10, 2)
+  currency    String     @default("USD")
+  description String
+
+  earnedAt  DateTime  @default(now())
+  expiresAt DateTime?
+  paidOutAt DateTime?
+
+  @@map("rewards")
+}
+
+enum RewardType {
+  CASHBACK
+  SAVINGS_UNLOCKED
+  POINTS
+  CREDIT
+}
+
+// ─────────────────────────────────────────
+// SPONSORS
+// ─────────────────────────────────────────
+
+model Sponsor {
+  id           String  @id @default(cuid())
+  companyName  String
+  contactName  String
+  contactEmail String
+  contactPhone String?
+
+  pilotType       PilotType     @default(FOUNDING)
+  pilotStart      DateTime?
+  pilotEnd        DateTime?
+  contractedValue Decimal?      @db.Decimal(10, 2)
+
+  analyticsAccess Boolean       @default(true)
+  status          SponsorStatus @default(PROSPECT)
+  notes           String?       @db.Text
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  placements SponsorPlacement[]
+
+  @@map("sponsors")
+}
+
+enum PilotType {
+  FOUNDING
+  STANDARD
+}
+
+enum SponsorStatus {
+  PROSPECT
+  IN_NEGOTIATION
+  ACTIVE
+  COMPLETED
+  CHURNED
+}
+
+model SponsorPlacement {
+  id          String     @id @default(cuid())
+  sponsorId   String
+  sponsor     Sponsor    @relation(fields: [sponsorId], references: [id])
+  partnerId   String?
+  partner     Partner?   @relation(fields: [partnerId], references: [id])
+  conditionId String?
+  condition   Condition? @relation(fields: [conditionId], references: [id])
+
+  placementType PlacementType
+  displayOrder  Int           @default(0)
+  activeFrom    DateTime
+  activeTo      DateTime
+  active        Boolean       @default(true)
+
+  @@map("sponsor_placements")
+}
+
+enum PlacementType {
+  FEATURED_CARD
+  CATEGORY_HERO
+  HUB_BANNER
+  EMAIL_FEATURE
+}
+
+// ─────────────────────────────────────────
+// ANALYTICS & WAITLIST
+// ─────────────────────────────────────────
+
+model AnalyticsEvent {
+  id          String     @id @default(cuid())
+  eventType   EventType
+  sessionId   String?
+  userId      String?
+  conditionId String?
+  condition   Condition? @relation(fields: [conditionId], references: [id])
+  partnerId   String?
+  partner     Partner?   @relation(fields: [partnerId], references: [id])
+  metadata    Json?
+  createdAt   DateTime   @default(now())
+
+  @@map("analytics_events")
+}
+
+enum EventType {
+  PAGE_VIEW
+  CONDITION_SELECTED
+  PARTNER_VIEWED
+  BENEFIT_CLICKED
+  ONBOARDING_STARTED
+  ONBOARDING_COMPLETED
+  WAITLIST_JOINED
+  SEARCH_PERFORMED
+  FILTER_APPLIED
+}
+
+model WaitlistEntry {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  conditionInterest String?
+  source            String?
+  createdAt         DateTime  @default(now())
+  convertedAt       DateTime?
+
+  @@map("waitlist_entries")
+}
+
+// ─────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  adminId    String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@map("audit_logs")
+}
